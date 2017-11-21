@@ -18,6 +18,7 @@
 #include "argv-array.h"
 #include "utf8.h"
 #include "packfile.h"
+#include "list-objects-filter-options.h"
 
 static const char * const builtin_fetch_usage[] = {
 	N_("git fetch [<options>] [<repository> [<refspec>...]]"),
@@ -55,6 +56,7 @@ static int recurse_submodules_default = RECURSE_SUBMODULES_ON_DEMAND;
 static int shown_url = 0;
 static int refmap_alloc, refmap_nr;
 static const char **refmap_array;
+static struct list_objects_filter_options filter_options;
 
 static int git_fetch_config(const char *k, const char *v, void *cb)
 {
@@ -160,6 +162,7 @@ static struct option builtin_fetch_options[] = {
 			TRANSPORT_FAMILY_IPV4),
 	OPT_SET_INT('6', "ipv6", &family, N_("use IPv6 addresses only"),
 			TRANSPORT_FAMILY_IPV6),
+	OPT_PARSE_LIST_OBJECTS_FILTER(&filter_options),
 	OPT_END()
 };
 
@@ -1044,6 +1047,9 @@ static struct transport *prepare_transport(struct remote *remote, int deepen)
 		set_option(transport, TRANS_OPT_DEEPEN_RELATIVE, "yes");
 	if (update_shallow)
 		set_option(transport, TRANS_OPT_UPDATE_SHALLOW, "yes");
+	if (filter_options.choice)
+		set_option(transport, TRANS_OPT_LIST_OBJECTS_FILTER,
+			   filter_options.filter_spec);
 	return transport;
 }
 
@@ -1241,6 +1247,20 @@ static int fetch_multiple(struct string_list *list)
 {
 	int i, result = 0;
 	struct argv_array argv = ARGV_ARRAY_INIT;
+
+	if (filter_options.choice) {
+		/*
+		 * We currently only support partial-fetches to the remote
+		 * used for the partial-clone because we only support 1
+		 * promisor remote, so we DO NOT allow explicit command
+		 * line filter arguments for multi-fetches.
+		 *
+		 * Note that the loop below will spawn background fetches
+		 * for each remote and one of them MAY INHERIT the proper
+		 * partial-fetch settings, so everything is consistent.
+		 */
+		die(_("partial-fetch is not supported on multiple remotes"));
+	}
 
 	if (!append && !dry_run) {
 		int errcode = truncate_fetch_head();
